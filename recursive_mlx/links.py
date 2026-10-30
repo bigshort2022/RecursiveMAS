@@ -58,4 +58,7 @@ def load_link(path, in_dim, out_dim=None):
 def apply_link(module, x, output_dtype=None):
     dtype = dict(tree_flatten(module.parameters()))["proj1.weight"].dtype
     y = module(x.astype(dtype))
-    return y.astype(output_dtype) if output_dtype is not None else y
+    y = y.astype(output_dtype) if output_dtype is not None else y
+    if not mx.all(mx.isfinite(y)).item():
+        raise ValueError("non-finite link output after dtype conversion")
+    return y

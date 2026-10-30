@@ -14,7 +14,8 @@ def latent_rollout(backend, inner, embeds, steps, budget):
     for _ in range(steps):
         budget.check(embeds.shape[1])
         last = backend.hidden(embeds)[:, -1:, :]
-        mx.eval(last)
+        if not mx.all(mx.isfinite(last)).item():
+            raise ValueError("non-finite decoder state")
         states.append(last)
         next_embed = apply_link(inner, last, embeds.dtype)
         embeds = mx.concatenate([embeds, next_embed], axis=1)
@@ -126,6 +127,8 @@ def run_sequential(
     for _ in range(budget.limits.max_tokens):
         budget.check(embeds.shape[1])
         logits = backend.logits(backend.hidden(embeds)[:, -1:, :])
+        if not mx.all(mx.isfinite(logits)).item():
+            raise ValueError("non-finite solver logits")
         token = int(mx.argmax(logits[0, -1]).item())
         tokens.append(token)
         if token in eos_ids:
