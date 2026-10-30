@@ -148,6 +148,69 @@ class NativeTests(unittest.TestCase):
                 convert_link(source, Path(d) / "bad", "inner", 4, 4)
             self.assertFalse((Path(d) / "bad").exists())
 
+    def test_conversion_rejects_pickled_modules_with_structured_error(self):
+        import contextlib
+        import io
+        import json
+        import torch
+        from recursive_mlx.cli import main
+        from recursive_mlx.conversion import convert_link
+
+        with tempfile.TemporaryDirectory() as d:
+            source, destination = Path(d) / "module.pt", Path(d) / "converted"
+            torch.save(torch.nn.Linear(4, 4), source)
+            with self.assertRaisesRegex(ValueError, "tensor-only"):
+                convert_link(source, destination, "inner", 4, 4)
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                status = main(
+                    [
+                        "convert-link",
+                        str(source),
+                        str(destination),
+                        "--kind",
+                        "inner",
+                        "--in-dim",
+                        "4",
+                        "--out-dim",
+                        "4",
+                    ]
+                )
+            self.assertEqual(status, 1)
+            self.assertEqual(
+                json.loads(output.getvalue())["error"]["code"], "ValueError"
+            )
+            self.assertFalse(destination.exists())
+
+    def test_conversion_rejects_invalid_tensor_dictionaries(self):
+        import torch
+        from mlx.utils import tree_flatten
+        from recursive_mlx.links import InnerLink
+        from recursive_mlx.conversion import convert_link
+
+        weights = {
+            name: torch.tensor(np.array(value))
+            for name, value in tree_flatten(InnerLink(4).parameters())
+        }
+        cases = {
+            "missing": {k: v for k, v in weights.items() if k != "proj1.weight"},
+            "extra": {**weights, "unexpected": torch.ones(1)},
+            "nonfinite": {**weights, "proj1.weight": torch.full((4, 4), float("nan"))},
+            "integer": {
+                **weights,
+                "proj1.weight": torch.ones((4, 4), dtype=torch.int32),
+            },
+            "nested": {"state_dict": weights},
+        }
+        with tempfile.TemporaryDirectory() as d:
+            for label, state in cases.items():
+                with self.subTest(case=label):
+                    source, destination = Path(d) / (label + ".pt"), Path(d) / label
+                    torch.save(state, source)
+                    with self.assertRaises(ValueError):
+                        convert_link(source, destination, "inner", 4, 4)
+                    self.assertFalse(destination.exists())
+
     def test_smoke_real_recursive_path(self):
         from recursive_mlx.engine import smoke
 

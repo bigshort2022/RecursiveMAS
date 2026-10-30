@@ -1,6 +1,7 @@
 """Explicit local tensor-only conversion. PyTorch is a conversion-only dependency."""
 
 import os
+import pickle
 import shutil
 import tempfile
 from pathlib import Path
@@ -21,7 +22,13 @@ def convert_link(source, destination, kind, in_dim, out_dim):
     if kind == "inner" and in_dim != out_dim:
         raise ValueError("inner link dimensions must match")
     source_hash = sha256(source)
-    state = torch.load(source, map_location="cpu", weights_only=True)
+    try:
+        state = torch.load(source, map_location="cpu", weights_only=True)
+    except (pickle.UnpicklingError, EOFError) as exc:
+        # Never retry with unrestricted pickle or add deserialization allowlists.
+        raise ValueError(
+            "source must be a supported tensor-only state dictionary"
+        ) from exc
     if not isinstance(state, dict) or not all(
         isinstance(v, torch.Tensor) for v in state.values()
     ):
