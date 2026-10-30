@@ -17,7 +17,7 @@ def identity(value):
 
 def atomic_json(path, data):
     path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     fd, name = tempfile.mkstemp(prefix=".pending-", dir=path.parent)
     try:
         with os.fdopen(fd, "w") as stream:
@@ -40,7 +40,7 @@ class Receipts:
 
     def __init__(self, root, run_identity):
         self.root = Path(root)
-        self.root.mkdir(parents=True, exist_ok=True)
+        self.root.mkdir(mode=0o700, parents=True, exist_ok=True)
         self.run_hash = identity(run_identity)
         path = self.root / "run.json"
         record = {"schema": 1, "identity": run_identity, "run_hash": self.run_hash}
@@ -59,15 +59,18 @@ class Receipts:
             return None
         row = json.loads(path.read_text())
         if (
-            row.get("run_hash") != self.run_hash
+            not isinstance(row, dict)
+            or row.get("run_hash") != self.run_hash
             or row.get("sample_id") != sample_id
-            or "result" not in row
+            or not isinstance(row.get("result"), dict)
             or row.get("result_hash") != identity(row["result"])
         ):
             raise ValueError("corrupt or mismatched sample receipt")
         return row["result"]
 
     def put(self, sample_id, result):
+        if not isinstance(result, dict):
+            raise ValueError("sample result must be an object")
         old = self.get(sample_id)
         if old is not None:
             if old != result:
@@ -91,7 +94,7 @@ class RunLock:
     def __enter__(self):
         import fcntl
 
-        self.root.mkdir(parents=True, exist_ok=True)
+        self.root.mkdir(mode=0o700, parents=True, exist_ok=True)
         self.stream = (self.root / ".run.lock").open("a+")
         try:
             fcntl.flock(self.stream, fcntl.LOCK_EX | fcntl.LOCK_NB)

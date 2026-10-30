@@ -54,6 +54,58 @@ class ContractTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 r.get("sample")
 
+    def test_receipts_reject_nonobject_results(self):
+        from recursive_mlx.results import Receipts, identity
+
+        with tempfile.TemporaryDirectory() as d:
+            r = Receipts(d, {"bundle": "fixture"})
+            for invalid in (None, [], "text", 1):
+                with self.subTest(value=invalid):
+                    with self.assertRaises(ValueError):
+                        r.put("sample", invalid)
+                    path = r._path("sample")
+                    path.write_text(
+                        json.dumps(
+                            {
+                                "run_hash": r.run_hash,
+                                "sample_id": "sample",
+                                "result": invalid,
+                                "result_hash": identity(invalid),
+                            }
+                        )
+                    )
+                    with self.assertRaises(ValueError):
+                        r.get("sample")
+                    path.unlink()
+
+    def test_receipts_reject_nonobject_envelopes(self):
+        from recursive_mlx.results import Receipts
+
+        with tempfile.TemporaryDirectory() as d:
+            r = Receipts(d, {"bundle": "fixture"})
+            for invalid in (None, [], "text", 1):
+                with self.subTest(value=invalid):
+                    r._path("sample").write_text(json.dumps(invalid))
+                    with self.assertRaises(ValueError):
+                        r.get("sample")
+
+    def test_new_result_directories_are_private(self):
+        import os
+        import stat
+        from recursive_mlx.results import Receipts, RunLock
+
+        with tempfile.TemporaryDirectory() as d:
+            old_umask = os.umask(0o022)
+            try:
+                receipt_root = Path(d) / "receipts"
+                Receipts(receipt_root, {"bundle": "fixture"})
+                self.assertEqual(stat.S_IMODE(receipt_root.stat().st_mode), 0o700)
+                lock_root = Path(d) / "locked"
+                with RunLock(lock_root):
+                    self.assertEqual(stat.S_IMODE(lock_root.stat().st_mode), 0o700)
+            finally:
+                os.umask(old_umask)
+
     def test_bundle_containment_and_hash(self):
         from recursive_mlx.bundle import checked_file
 
