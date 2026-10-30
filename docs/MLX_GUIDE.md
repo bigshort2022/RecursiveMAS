@@ -38,6 +38,7 @@ has no PyTorch installed. Do not set USE_TORCH=0 in the independent PyTorch pari
 The standard-library tests need no MLX:
 ```bash
 python3 -m unittest discover -s tests_mlx -p test_contracts.py -v
+python3 -m unittest discover -s tests_mlx -p test_recovery.py -v
 ```
 
 The complete suite also needs PyTorch for independent reference math and adapter conversion.
@@ -157,18 +158,27 @@ or creating output. It cannot establish actual peak memory or useful model quali
 
 To execute, replace `--dry-run` with `--allow-unqualified`. Run in a dedicated process.
 Stdout is one structured final result; stderr reports stage progress.
+Use a dedicated output directory outside the bundle, and keep the input file outside that
+output directory too. New output directories are owner-only (0700); existing directories
+retain their permissions, so verify those yourself before processing private inputs.
 Repeat the **same command and identities** to resume previously completed samples.
 Changing inputs, limits, code/dependency versions or bundle requires a new output directory.
 
 Outputs:
 - `run.json`: source/configuration/dependency/input identity.
 - `sample-*.json`: immutable per-sample tokens, text and timings with integrity hash.
-- `summary.json`: completed count, resume count and MLX peak counter.
+- `summary.json`: completed count and resume count; includes the MLX peak counter when
+  this invocation executed models. A receipt-only resume reconstructs this summary without
+  loading models and does not invent a peak-memory measurement.
 - `.run.lock`: process exclusion, not a stale PID sentinel.
 
 Ctrl-C/SIGTERM requests cooperative cancellation. The current sample is retried if it
 did not commit a receipt. There is no mid-latent resume. Deadline includes loading and
 remaining work for that invocation; already committed samples survive failures.
+Non-finite decoder/link/logit values fail the sample rather than generating a successful
+answer. A completed receipt survives process death; an uncommitted sample is recomputed.
+SIGKILL around receipt publication and cooperative SIGTERM at a controlled loading boundary
+are tested. Physical power-loss durability and interrupted Metal kernels are not certified.
 Do not interpret a memory estimate or allocator setting as OS isolation.
 
 ## 5. Valuable experiments and honest interpretation
@@ -198,5 +208,6 @@ full-checkpoint inference or claim the upstream paper's results.
 | Quantization, KV caching, batched inputs | Not implemented |
 | Other styles and training | Not implemented |
 | Hard OS resource isolation | Not provided |
-| Fault/power-loss qualification | Unit/integration receipt checks only; not a durability certification |
+| Process-crash recovery | SIGKILL before/after receipt rename and controlled SIGTERM tested |
+| Power-loss / sustained pressure qualification | Not established; no durability certification |
 | GitHub/PyPI release or model upload | Separate publication gate |

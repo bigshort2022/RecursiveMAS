@@ -29,7 +29,9 @@ Full AXI/TOON is optional and is not advertised as implemented.
 Native execution has been exercised with tiny random Qwen3, Llama and Qwen2 models.
 Independent PyTorch comparisons cover tiny decoder hidden states and inner/outer links.
 An offline local model-bundle test covers loading, real tokenizer prompts, inference,
-durable receipts and resume. These tests establish mechanics, **not useful answer quality**.
+durable receipts and resume. The hardened suite also exercises real process death around
+receipt publication, cooperative cancellation and numerical-failure rejection.
+These tests establish mechanics, **not useful answer quality**.
 
 On the reviewed M5, default MLX FP32 matmul behavior exceeded the strict link tolerance.
 The same test passed with `MLX_ENABLE_TF32=0`; tolerances were not loosened.
@@ -37,7 +39,7 @@ The reference CLI chooses that setting unless explicitly supplied otherwise, and
 runs reject a nonzero setting. Production-size and quantized behavior require separate evaluation.
 
 Still gated: full-size released checkpoints, independent quality scoring, sustained
-memory/thermal behavior, abrupt-process crash qualification, caching/quantization,
+memory/thermal behavior, broader crash/power-loss qualification, caching/quantization,
 other collaboration styles, training, sandboxed code evaluation and production deployment.
 No speedup, paper reproduction or complete-spec claim is made.
 

@@ -37,9 +37,11 @@ Base: cbfcaab56c9a8f660a9be598750b4ff3cd762056. Fresh clone; branch feat/mlx-inf
 ## Remaining gates
 
 - [ ] Full-size approved model bundle and independently scored quality comparison.
-- [ ] Abrupt worker/process crash and sustained resource-pressure qualification.
+- [x] Targeted real-process SIGKILL receipt-boundary and cooperative SIGTERM tests.
+- [ ] Broader worker crash, sustained resource-pressure and physical power-loss qualification.
 - [ ] Production-size numerical tolerances and non-inferiority protocol approval.
 - [ ] Remaining P4–P7 scope (optimizations, styles, training) implemented and qualified separately.
+- [x] Jev-assisted risk screening and direct regression-driven hardening; see `docs/MLX_AUTONOMOUS_REVIEW.md`.
 - [ ] Independent code review before merge or release.
 
 The implementation is an experimental inference preview, not completion of the whole design.
