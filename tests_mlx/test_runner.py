@@ -100,7 +100,18 @@ class RunnerTests(unittest.TestCase):
             report = run(args, limits)
             self.assertEqual(report["completed"], 1)
             self.assertEqual(report["resumed"], 0)
-            report = run(args, limits)
+            # Simulate death after the last receipt but before summary publication.
+            (args.output / "summary.json").unlink()
+            from unittest.mock import patch
+
+            with patch(
+                "recursive_mlx.backend.load_backend",
+                side_effect=AssertionError("resume must not load models"),
+            ):
+                report = run(args, limits)
+            self.assertEqual(
+                json.loads((args.output / "summary.json").read_text()), report
+            )
             self.assertEqual(report["resumed"], 1)
             self.assertEqual(report["model_quality"], "unqualified")
             with self.assertRaises(ValueError):
@@ -133,6 +144,150 @@ class RunnerTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 run(args, Limits(max_samples=2))
             self.assertFalse(args.output.exists())
+
+    def test_preflight_rejects_input_within_output_directory(self):
+        from recursive_mlx.runner import run
+        from recursive_mlx.contracts import Limits
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            directory = root / "bundle"
+            directory.mkdir()
+            manifest = make_bundle(directory)
+            output = root / "output"
+            output.mkdir()
+            samples = output / "summary.json"
+            original = '[{"id":"a","question":"hello"}]'
+            samples.write_text(original)
+            args = SimpleNamespace(
+                bundle=manifest,
+                input=samples,
+                output=output,
+                memory_budget_bytes=50000000,
+                dry_run=True,
+                allow_unqualified=True,
+            )
+            with self.assertRaisesRegex(ValueError, "input.*outside"):
+                run(args, Limits())
+            self.assertEqual(samples.read_text(), original)
+            self.assertEqual(list(output.iterdir()), [samples])
+
+    def test_allocator_setup_failure_restores_process_state(self):
+        import signal
+        from unittest.mock import patch
+        from recursive_mlx.runner import run
+        from recursive_mlx.contracts import Limits
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            directory = root / "bundle"
+            directory.mkdir()
+            manifest = make_bundle(directory)
+            samples = root / "input.json"
+            samples.write_text('[{"id":"a","question":"hello"}]')
+            args = SimpleNamespace(
+                bundle=manifest,
+                input=samples,
+                output=root / "out",
+                memory_budget_bytes=50000000,
+                dry_run=False,
+                allow_unqualified=True,
+            )
+            handlers = {s: signal.getsignal(s) for s in (signal.SIGINT, signal.SIGTERM)}
+            old_limit = mx.set_memory_limit(60000000)
+            mx.set_memory_limit(old_limit)
+            try:
+                with patch(
+                    "mlx.core.set_cache_limit",
+                    side_effect=RuntimeError("injected allocator failure"),
+                ):
+                    with self.assertRaisesRegex(
+                        RuntimeError, "injected allocator failure"
+                    ):
+                        run(args, Limits())
+                observed_limit = mx.set_memory_limit(old_limit)
+                self.assertEqual(observed_limit, old_limit)
+                for sig, handler in handlers.items():
+                    self.assertEqual(signal.getsignal(sig), handler)
+            finally:
+                mx.set_memory_limit(old_limit)
+                for sig, handler in handlers.items():
+                    signal.signal(sig, handler)
+
+    def test_sigterm_cancels_worker_without_committing_sample(self):
+        import select
+        import signal
+        import subprocess
+        import sys
+        from recursive_mlx.results import RunLock
+
+        worker_code = """
+import signal
+import threading
+from recursive_mlx import backend
+from recursive_mlx.cli import main
+load = backend.load_backend
+def controlled_load(path):
+    handler = signal.getsignal(signal.SIGTERM)
+    received = threading.Event()
+    def forward(*args):
+        handler(*args)
+        received.set()
+    signal.signal(signal.SIGTERM, forward)
+    try:
+        print("ready", flush=True)
+        if not received.wait(10):
+            raise RuntimeError("test cancellation did not arrive")
+    finally:
+        signal.signal(signal.SIGTERM, handler)
+    return load(path)
+backend.load_backend = controlled_load
+raise SystemExit(main())
+"""
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            directory = root / "bundle"
+            directory.mkdir()
+            manifest = make_bundle(directory)
+            samples, output = root / "input.json", root / "out"
+            samples.write_text('[{"id":"a","question":"hello"}]')
+            worker = subprocess.Popen(
+                [
+                    sys.executable,
+                    "-c",
+                    worker_code,
+                    "run",
+                    "--bundle",
+                    str(manifest),
+                    "--input",
+                    str(samples),
+                    "--output",
+                    str(output),
+                    "--memory-budget-bytes",
+                    "50000000",
+                    "--allow-unqualified",
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            try:
+                ready, _, _ = select.select([worker.stdout], [], [], 15)
+                self.assertTrue(ready, "worker did not reach cancellation boundary")
+                self.assertEqual(worker.stdout.readline().strip(), "ready")
+                worker.send_signal(signal.SIGTERM)
+                stdout, stderr = worker.communicate(timeout=15)
+                self.assertEqual(worker.returncode, 1, stderr)
+                self.assertEqual(json.loads(stdout)["error"]["code"], "Cancelled")
+                self.assertTrue((output / "run.json").exists())
+                self.assertEqual(list(output.glob("sample-*.json")), [])
+                self.assertFalse((output / "summary.json").exists())
+                with RunLock(output):
+                    pass
+            finally:
+                if worker.poll() is None:
+                    worker.kill()
+                worker.communicate(timeout=10)
 
     def test_resume_lock_exclusion(self):
         from recursive_mlx.results import RunLock

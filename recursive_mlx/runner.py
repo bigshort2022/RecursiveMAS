@@ -5,6 +5,7 @@ import json
 import os
 import signal
 import sys
+from contextlib import ExitStack
 from dataclasses import asdict
 from pathlib import Path
 from .bundle import EDGES, ROLES, sha256, validate_bundle
@@ -63,6 +64,8 @@ def run(args, limits):
     output = args.output.resolve()
     if output == root or output.is_relative_to(root):
         raise ValueError("results must be outside the immutable bundle")
+    if args.input.resolve().is_relative_to(output):
+        raise ValueError("input must be outside the result directory")
     planned = {
         "status": "planned",
         "bundle_id": bundle_id,
@@ -98,28 +101,38 @@ def run(args, limits):
         pending = [row for row in samples if receipts.get(row["id"]) is None]
         resumed = len(samples) - len(pending)
         if not pending:
-            return {
+            report = {
                 "status": "completed",
                 "completed": len(samples),
                 "resumed": resumed,
                 "run_hash": receipts.run_hash,
                 "model_quality": "unqualified",
+                "memory_enforcement": "cooperative_not_os_isolation",
             }
+            # Receipts are authoritative even if the prior process died before its summary.
+            atomic_json(output / "summary.json", report)
+            return report
         import mlx.core as mx
         from .backend import load_backend
         from .links import load_link
         from .engine import run_sequential
 
         cancelled = [False]
-        old_handlers = {s: signal.getsignal(s) for s in (signal.SIGINT, signal.SIGTERM)}
-        for s in old_handlers:
-            signal.signal(s, lambda *_: cancelled.__setitem__(0, True))
-        budget = Budget(limits, cancelled=lambda: cancelled[0])
-        # MLX allocator limit is not an OS guarantee; stage checks and process ownership remain necessary.
-        old_limit = mx.set_memory_limit(args.memory_budget_bytes)
-        old_cache = mx.set_cache_limit(0)
         roles, inner, outer = {}, {}, {}
-        try:
+        # Register restoration immediately after each successful state change, including setup.
+        with ExitStack() as cleanup:
+            for s in (signal.SIGINT, signal.SIGTERM):
+                handler = signal.signal(s, lambda *_: cancelled.__setitem__(0, True))
+                cleanup.callback(signal.signal, s, handler)
+            budget = Budget(limits, cancelled=lambda: cancelled[0])
+            # Allocator limits are cooperative, not hard OS memory isolation.
+            old_limit = mx.set_memory_limit(args.memory_budget_bytes)
+            cleanup.callback(mx.set_memory_limit, old_limit)
+            old_cache = mx.set_cache_limit(0)
+            cleanup.callback(mx.set_cache_limit, old_cache)
+            cleanup.callback(mx.clear_cache)
+            for owned in (roles, inner, outer):
+                cleanup.callback(owned.clear)
 
             def check_memory():
                 budget.check()
@@ -165,12 +178,3 @@ def run(args, limits):
             }
             atomic_json(output / "summary.json", report)
             return report
-        finally:
-            roles.clear()
-            inner.clear()
-            outer.clear()
-            mx.clear_cache()
-            mx.set_cache_limit(old_cache)
-            mx.set_memory_limit(old_limit)
-            for s, handler in old_handlers.items():
-                signal.signal(s, handler)
