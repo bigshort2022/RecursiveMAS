@@ -1,0 +1,8 @@
+# Native inference profile verified on Apple M5 / Python 3.12.
+# PyTorch is intentionally absent; use a separate reference/conversion environment.
+mlx==0.32.2
+mlx-lm==0.31.3
+transformers==5.16.1
+tokenizers==0.23.2
+safetensors==0.8.0
+numpy==2.5.2

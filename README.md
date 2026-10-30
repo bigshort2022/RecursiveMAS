@@ -27,6 +27,21 @@ Scaling Agent Collaboration through Recurrent Depth in Latent Space
   <video src="https://github.com/user-attachments/assets/9c09261a-c9e7-4851-8462-eeda69989b4e" controls width="300"></video>
 </p>
 
+## Apple Silicon / MLX inference preview
+
+This fork includes an **experimental native MLX sequential-light backend** alongside
+(the unchanged computational path of) the PyTorch reference. It supports bounded,
+local-only inference and tiny-model parity tests; full released-checkpoint quality,
+training and other collaboration styles are **not yet qualified**.
+
+- [CTO executive summary and valuable use cases](docs/MLX_EXECUTIVE_SUMMARY.md)
+- [Setup, tested smoke command, local bundles and resume](docs/MLX_GUIDE.md)
+- [Verification evidence and remaining gates](docs/MLX_VERIFICATION.md)
+- [Detailed port specification](docs/specs/mlx-port.md)
+
+After installing `requirements-mlx.txt`, run `python -m recursive_mlx smoke`.
+No model download, service startup or AXI dependency is required for this synthetic check.
+
 ## 💡 News
 
 **[2026.06.28]** Complete **training implementations & data** ([🤗 HF Datasets](https://huggingface.co/RecursiveMAS/datasets)), and **inference & evaluation pipelines** for RecursiveMAS are now available! Also checkout our [**updated project website**](https://recursivemas.github.io/)!
